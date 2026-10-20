@@ -1,0 +1,6 @@
+%{
+  "complex": {:hex, :complex, "1.0.0", "32075df521760e83d808652f52dd57f21712d47d5918a328709da78358387507", [:mix], [], "hexpm", "b4fd7ab305712472521043aa4322f7e4cdd85ca3ddf79c9c2c338d6663adc8d8"},
+  "nx": {:hex, :nx, "1.0.0", "83d586079cb37d11a4cf8c0edaf2eccafe88aa2369e35ebdb1c3d78c43c8eb33", [:mix], [{:complex, "~> 1.0", [hex: :complex, repo: "hexpm", optional: false]}, {:telemetry, "~> 0.4.0 or ~> 1.0", [hex: :telemetry, repo: "hexpm", optional: false]}], "hexpm", "e06c7587efff7a3dfc1e2c92705943e319db20070359e9850c3921aaf26d6998"},
+  "stream_data": {:hex, :stream_data, "1.4.0", "026f929db613aabea6208012ae9b8970d3fd5f88b3bdf26831bc536f98c42036", [:mix], [], "hexpm", "2b0ee3a340dcce1c8cf6302a763ee757d1e01c54d6e16d9069062509d68b1dc9"},
+  "telemetry": {:hex, :telemetry, "1.4.2", "a0cb522801dffb1c49fe6e30561badffc7b6d0e180db1300df759faa22062855", [:rebar3], [], "hexpm", "928f6495066506077862c0d1646609eed891a4326bee3126ba54b60af61febb1"},
+}
