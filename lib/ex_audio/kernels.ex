@@ -25,9 +25,9 @@ defmodule ExAudio.Kernels do
 
     [
       {"biquad", Biquad.spec(peaking), ii: :auto},
-      {"biquad_ch9", Biquad.spec(peaking), channels: 9},
+      {"biquad_ch8", Biquad.spec(peaking), channels: 8},
       {"gate", Dynamics.spec(:gate), ii: :auto},
-      {"gate_ch15", Dynamics.spec(:gate), channels: 15},
+      {"gate_ch7", Dynamics.spec(:gate), channels: 7},
       {"compressor", Dynamics.spec(:compressor, knee_db: 6), ii: :auto},
       {"compressor_ch7", Dynamics.spec(:compressor, knee_db: 6), channels: 7},
       {"peak_meter", Meter.spec(:peak), ii: :auto},

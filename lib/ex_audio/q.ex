@@ -43,11 +43,8 @@ defmodule ExAudio.Q do
   @doc "Saturates to 24 bits, result `s32`."
   deftransform(sat24(x), do: x |> Nx.clip(@sample_min, @sample_max) |> Nx.as_type(:s32))
 
-  @doc """
-  `|x|` as `max(max(x, 0 - x), 0)` (the outer `max` lets the range analysis see that the result is not negative). The generated SystemVerilog of `Nx.abs/1` contains
-  `-25'(n)`, which Yosys 0.69 reads as a cast to a negative size (see NEEDS.md).
-  """
-  deftransform absolute(x), do: Nx.max(Nx.max(x, Nx.subtract(0, x)), 0)
+  @doc "`|x|` (`Nx.abs/1`; the range of a 24-bit sample goes to `0..2^23`)."
+  deftransform absolute(x), do: Nx.abs(x)
 
   @doc "`s64` view of a tensor (products of 32-bit values need it)."
   deftransform(wide(x), do: Nx.as_type(x, :s64))

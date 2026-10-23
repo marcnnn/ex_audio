@@ -76,7 +76,8 @@ defmodule ExAudio.MeterTest do
 
     property "reads the level of a sine within 0.1 dB from -80 dBFS to 0 dBFS" do
       check all level <- float(min: -80.0, max: -1.0),
-                freq <- log_uniform(100, 5000),
+                # the ripple at 2f of a 30 ms mean square is 0.1 dB at 115 Hz
+                freq <- log_uniform(150, 5000),
                 max_runs: 15 do
         a = @full * :math.pow(10, level / 20)
         xs = signal(9600, freq, a, 0.0, round(freq))

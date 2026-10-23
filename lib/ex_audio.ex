@@ -16,6 +16,8 @@ defmodule ExAudio do
   | `ExAudio.Matrix` | sparse crosspoint mixer: BEAM model and the kernel for one output row |
   | `ExAudio.Q` | formats, log2/exp2 tables, kernel specifications |
   | `ExAudio.Kernels` | the kernels as `mix ex_hdl.gen.sv` entries |
+  | `ExAudio.Mixer` | the 1024 channel mixer in RTL: strips, matrix, meters, register map (`Mixer.Config`, `Mixer.Strip`, `Mixer.Matrix`, `Mixer.Meters`, `Mixer.Layout`, `Mixer.Regs`) |
+  | `ExAudio.Mixer.Host` | musical units (Hz, dB, ms, gains) to register and window writes |
 
   Samples are 24-bit integers (Q1.23) in `s32` tensors. Every kernel comes
   with `spec/n`, a keyword list with the function, argument templates,

@@ -97,6 +97,60 @@ defmodule ExAudio.Strip do
     if Keyword.get(opts, :baked, false), do: bake(spec), else: spec
   end
 
+  @doc "Number of biquad sections of the hardware strip (`cascade_spec/1` default)."
+  def sections, do: 4
+
+  @doc """
+  The strip as one cascade for `ExHdl.DSP.cascade/1` (the form
+  `ExHdl.DSP.scan_to_sv/3` takes, with `channels:` and `channel_params:`
+  for many channels): `sections` biquads (default 4) named `eq1`..., then
+  `gate` and `comp` unless `dynamics: false`. Every section keeps its own
+  recurrence, so the loop of the whole strip is one biquad's. Returns
+  `[fun:, args:, state: 1, init:, param_ranges:, param_names:]`; the
+  parameter leaves are the per-channel coefficient word
+  (`channel_words/2`).
+  """
+  def cascade_spec(opts \\ []) do
+    stage = fn spec, name ->
+      Keyword.take(spec, [:fun, :args, :state, :param_ranges, :init, :param_names]) ++
+        [name: name]
+    end
+
+    eq =
+      for k <- 1..Keyword.get(opts, :sections, sections()),
+          do: stage.(Biquad.spec(Biquad.identity()), "eq#{k}")
+
+    dynamics =
+      if Keyword.get(opts, :dynamics, true),
+        do: [stage.(Dynamics.spec(:gate), "gate"), stage.(Dynamics.spec(:compressor), "comp")],
+        else: []
+
+    ExHdl.DSP.cascade(eq ++ dynamics)
+  end
+
+  @doc """
+  The per-channel parameter word of a strip as a list of 32-bit signed
+  integers in the order of `cascade_spec/1`: the biquad coefficients
+  `{b0, b1, b2, a1, a2}` of `coefs` (quantised, see `ExAudio.Biquad`),
+  then with `dynamics: true` (default) the gate and compressor parameters
+  designed from `:gate` and `:compressor` (options of
+  `ExAudio.Dynamics.gate_params/1` and `compressor_params/1`).
+  """
+  def channel_words(coefs, opts \\ []) do
+    eq = Enum.flat_map(coefs, &Tuple.to_list/1)
+
+    if Keyword.get(opts, :dynamics, true) do
+      gate = opts |> Keyword.get(:gate, []) |> Dynamics.gate_params() |> Tuple.to_list()
+
+      comp =
+        opts |> Keyword.get(:compressor, []) |> Dynamics.compressor_params() |> Tuple.to_list()
+
+      eq ++ gate ++ comp
+    else
+      eq
+    end
+  end
+
   # The parameters become constants of a two-argument kernel; their ranges are
   # then exact and the width check sees the values.
   defp bake(spec) do
