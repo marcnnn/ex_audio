@@ -186,16 +186,23 @@ again; its range `0..2^23` is proven directly).
 
 ## Open work (wave 3 hand-off)
 
-* URAM budget: XCKU3P has 48 URAM, the mixer needs 34 and ex_aes67 RX/TX
-  24. Plan: rewrite `ExAudio.Mixer.Matrix` as a scan gather kernel on the
-  pattern of `ExHdl.Test.Mixer.xmix/5` in `../exhdl/test/support/mixer_kernels.ex`
-  (`memories: ["src", "gain", "frame"]`, `frame: true`, `lanes: 1`,
-  accumulator through `ExHdl.DSP.wrap/2`); the exhdl experiment measured
-  13 URAM, 16 DSP, 48 RAMB18 for 1024x64. Not started.
+* URAM budget. Corrected 2026-10-23: the 34 URAM of the mixer top are
+  the two strip banks' state (17 each), not the matrix (0 URAM, 169 RAMB18
+  for 13 frame RAM copies and the crosspoint RAMs). The state is about
+  1200 bits per channel, so it is 17 URAMs wide but only `channels` deep
+  (a URAM is 4096 deep, a quarter used at 1024 channels). The card
+  (aes67_card) uses only the matrix, no strips, so it is not affected.
+  Done: `Config.new/1` puts the state in block RAM up to 512 channels.
+  Open: for 1024 channels the real fix is a folded state memory in the
+  exhdl scan backend (a channel's state over k rows of a k-times narrower
+  memory, the kernel accepting one sample every k cycles; the strip needs
+  1024 of 5208 cycles per frame, so k = 4 fits): 5 URAM per bank instead
+  of 17. A gather-kernel matrix would trade the matrix's block RAM for
+  URAM (13 URAM, 48 RAMB18 for 1024x64), so it helps the block RAM budget
+  only.
 * Narrow the strip state and replace the hand-written clamps in
   `ExAudio.Mixer.Strip` with `ExHdl.DSP.wrap/2` or the saturate helpers.
   Not started.
-* Test suite: the full `mix test` run did not finish in 600 s on the shared
-  host; `mixer_matrix_test.exs:293` ("one lane ... power-of-two split")
-  hit the 60 s ExUnit timeout inside the Verilator compile. Needs a
-  `@tag timeout:` or a smaller configuration.
+* Test suite: the untagged co-simulation tests in `mixer_matrix_test.exs`
+  are now tagged `:verilator` with a 600 s timeout (Verilator builds on the
+  shared host take over 60 s).

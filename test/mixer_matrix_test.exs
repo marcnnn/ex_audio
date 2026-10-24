@@ -245,6 +245,7 @@ defmodule ExAudio.MixerMatrixTest do
   end
 
   @tag :verilator
+  @tag timeout: 600_000
   test "small mixer in Verilator and the BEAM simulator, output backpressure, 4 frames" do
     cfg = small()
     mod = Matrix.build(cfg)
@@ -274,6 +275,8 @@ defmodule ExAudio.MixerMatrixTest do
     assert Enum.count(outs, &(&1.m_axis_tvalid == 1 and &1.m_axis_tid == 0)) < 4
   end
 
+  @tag :verilator
+  @tag timeout: 600_000
   test "results that arrive while the previous frame is still streaming out are dropped and flagged" do
     cfg = small()
     mod = Matrix.build(cfg)
@@ -289,6 +292,8 @@ defmodule ExAudio.MixerMatrixTest do
     assert Enum.count(outs, &(&1.overrun_output == 1)) >= 1
   end
 
+  @tag :verilator
+  @tag timeout: 600_000
   test "one lane (no lane select) and a power-of-two split" do
     for opts <- [
           [channels: 8, slots: 4, frame_cycles: 1000],

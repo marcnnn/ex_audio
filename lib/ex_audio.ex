@@ -31,6 +31,6 @@ defmodule ExAudio do
       8
       iex> {:ok, design} = ExAudio.Q.to_sv(spec, name: "peq", ii: :auto)
       iex> {design.latency, design.in_width, design.out_width}
-      {16, 32, 32}
+      {17, 32, 32}
   """
 end

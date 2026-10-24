@@ -17,9 +17,17 @@ defmodule ExAudio.Mixer.Config do
 
   Options: `:channels` (1024, at most 2^16), `:slots` (a power of two, 64),
   `:fs` (48000), `:clock_mhz` (250), `:frame_cycles` (`clock / fs`),
-  `:lanes`, `:state_mem` (strips, `:ultra`), `:meter_mem` (`:block`),
+  `:lanes`, `:state_mem` (strips, see below), `:meter_mem` (`:block`),
   `:xp_style` (crosspoint RAMs, `:block`), `:family`
   (`:ultrascale_plus`).
+
+  The strip state is about 1200 bits per channel, so its memory is as
+  wide as 17 UltraRAMs (72 bits each) but only `channels` deep. A URAM is
+  4096 deep and a RAMB18 512, so up to 512 channels the state goes to block
+  RAM (34 RAMB18 per strip bank instead of 17 URAM), above that to URAM:
+
+      iex> {ExAudio.Mixer.Config.new(channels: 256).state_mem, ExAudio.Mixer.Config.new().state_mem}
+      {:block, :ultra}
   """
   import Bitwise
 
@@ -74,7 +82,7 @@ defmodule ExAudio.Mixer.Config do
       per_lane: per_lane,
       cycles: per_lane * slots + @pipe,
       family: Keyword.get(opts, :family, :ultrascale_plus),
-      state_mem: Keyword.get(opts, :state_mem, :ultra),
+      state_mem: Keyword.get(opts, :state_mem, if(channels > 512, do: :ultra, else: :block)),
       meter_mem: Keyword.get(opts, :meter_mem, :block),
       xp_style: Keyword.get(opts, :xp_style, :block),
       cw: clog2(channels),
