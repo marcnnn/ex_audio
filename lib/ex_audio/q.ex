@@ -65,6 +65,15 @@ defmodule ExAudio.Q do
     Nx.add(cur, Nx.right_shift(Nx.add(Nx.multiply(diff, k), bias), kbits))
   end
 
+  @doc """
+  `x` modulo `2^bits` (`0..2^bits - 1`), keeps the type. For a value that
+  is in that range anyway but whose range the width check cannot prove (a
+  smoother that never overshoots): the hardware keeps the low bits, where
+  a clamp would put comparators into the loop.
+  """
+  deftransform wrap_unsigned(x, bits),
+    do: Nx.bitwise_and(x, Nx.tensor((1 <<< bits) - 1, type: Nx.type(x)))
+
   @doc "Clamps `x` to `lo..hi` (Elixir integers), keeps the type."
   deftransform clamp(x, lo, hi) do
     type = Nx.type(x)

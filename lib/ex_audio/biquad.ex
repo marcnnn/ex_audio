@@ -54,15 +54,13 @@ defmodule ExAudio.Biquad do
   """
   import Nx.Defn
   import Bitwise
-  import NxFixed.Primitives, only: [shift_round: 2]
+  import NxFixed.Primitives, only: [shift_round: 2, saturate: 2]
 
   alias ExAudio.Q
 
   @b_frac 27
   @a_frac 30
   @guard 8
-  @y_max (1 <<< 31) - 1
-  @y_min -(1 <<< 31)
   # the residual of rounding the sum to 31 fractional bits has 50 - 31 = 19 bits
   @res_shift 19
   @res_bits 18
@@ -118,9 +116,9 @@ defmodule ExAudio.Biquad do
   """
   def ranges do
     s = Q.sample_range()
-    y = @y_min..@y_max
+    y = -(1 <<< 31)..((1 <<< 31) - 1)
     a2 = -(1 <<< 30)..((1 <<< 30) - 1)
-    full = @y_min..@y_max
+    full = y
     res = -(1 <<< @res_bits)..((1 <<< @res_bits) - 1)
     %{sample: [s], state: [s, s, y, y, res], params: [full, full, full, full, a2]}
   end
@@ -139,12 +137,12 @@ defmodule ExAudio.Biquad do
     acc =
       feedforward - Nx.right_shift(feedback, @a_frac + 23 + @guard - (@b_frac + 23)) + Q.wide(res)
 
-    y_ext = acc |> shift_round(@res_shift) |> Q.clamp(@y_min, @y_max)
+    y_ext = acc |> shift_round(@res_shift) |> saturate(:s32)
     # what rounding dropped, in [-2^18, 2^18): added to the next sum
     half = Nx.tensor(@res_half, type: :s64)
     res2 = acc |> Nx.add(half) |> Nx.bitwise_and(@res_mask) |> Nx.subtract(half)
-    y = y_ext |> shift_round(@guard) |> Q.sat24()
-    {y, {x, x1, Nx.as_type(y_ext, :s32), y1, Nx.as_type(res2, :s32)}}
+    y = y_ext |> Q.wide() |> shift_round(@guard) |> Q.sat24()
+    {y, {x, x1, y_ext, y1, Nx.as_type(res2, :s32)}}
   end
 
   @doc """

@@ -10,13 +10,19 @@ defmodule ExAudio.Dynamics do
   envelope carries 12 more fractional bits than a sample (35 bits) and the
   step is rounded away from the current value (`ExAudio.Q.approach/5`),
   so release times of seconds do not stall in a dead band and the
-  envelope reaches the input exactly.
+  envelope reaches the input exactly. The step never overshoots, so the
+  envelope stays between its old value and `|x|` (at most `2^23 - 1`,
+  `-2^23` counts as `2^23 - 1`), below `2^35`; the update is written as a
+  35-bit unsigned wrap (`ExAudio.Q.wrap_unsigned/2`), which proves the
+  state's range without a clamp in the feedback loop. The gate's gain
+  (`0..2^24`) is kept in 25 bits the same way.
 
   ## Gate
 
   `gate/3`: state `{env, open, hold, gain}`. The gate opens when the
   envelope exceeds `open_db` and closes below `close_db` (hysteresis),
-  stays open for `hold_ms` more, and its gain moves towards 1 (opening,
+  stays open for `hold_ms` more (at most 65535 samples, 1365 ms at 48 kHz),
+  and its gain moves towards 1 (opening,
   `attack_ms`) or towards `range_db` (closing, `release_ms`). The output uses
   the gain of the state, one sample behind the decision.
 
@@ -49,10 +55,14 @@ defmodule ExAudio.Dynamics do
   alias ExAudio.Q
 
   @env_shift 12
-  @env_max 1 <<< 35
+  @env_bits 35
+  @env_range 0..((1 <<< @env_bits) - 1)
+  @sample_max (1 <<< 23) - 1
   @k_bits 28
   @k_max (1 <<< @k_bits) - 1
   @unity 1 <<< 24
+  @gain_bits 25
+  @hold_max (1 <<< 16) - 1
 
   # -- design ----------------------------------------------------------------------
 
@@ -80,11 +90,18 @@ defmodule ExAudio.Dynamics do
   def gate_params(opts \\ []) do
     o = gate_opts(opts)
     fs = o[:fs]
+    hold = round(o[:hold_ms] * fs / 1000)
 
-    {amplitude(o[:open_db]), amplitude(o[:close_db]), round(o[:hold_ms] * fs / 1000),
-     round(db_gain(o[:range_db]) * @unity), coefficient(o[:detector_attack_ms], fs),
-     coefficient(o[:detector_release_ms], fs), coefficient(o[:attack_ms], fs),
-     coefficient(o[:release_ms], fs)}
+    unless hold <= @hold_max,
+      do:
+        raise(
+          ArgumentError,
+          "hold_ms: #{o[:hold_ms]} is #{hold} samples, at most #{@hold_max}"
+        )
+
+    {amplitude(o[:open_db]), amplitude(o[:close_db]), hold, round(db_gain(o[:range_db]) * @unity),
+     coefficient(o[:detector_attack_ms], fs), coefficient(o[:detector_release_ms], fs),
+     coefficient(o[:attack_ms], fs), coefficient(o[:release_ms], fs)}
   end
 
   defp gate_opts(opts) do
@@ -139,7 +156,7 @@ defmodule ExAudio.Dynamics do
 
   defp slope(:inf), do: 1.0
   defp slope(ratio), do: 1 - 1 / ratio
-  defp amplitude(db), do: db |> db_gain() |> Kernel.*(1 <<< 23) |> round() |> min(1 <<< 23)
+  defp amplitude(db), do: db |> db_gain() |> Kernel.*(1 <<< 23) |> round() |> min(@sample_max)
   defp db_gain(db), do: :math.pow(10, db / 20)
 
   @doc """
@@ -165,7 +182,7 @@ defmodule ExAudio.Dynamics do
 
   @doc "Declared tensor ranges of `envelope/3`, as `ExAudio.Biquad.ranges/0`."
   def envelope_ranges,
-    do: %{sample: [Q.sample_range()], state: [0..@env_max], params: [0..@k_max, 0..@k_max]}
+    do: %{sample: [Q.sample_range()], state: [@env_range], params: [0..@k_max, 0..@k_max]}
 
   @doc "Initial state of `envelope/3`."
   def init_envelope, do: Nx.tensor(0, type: :s64)
@@ -181,19 +198,20 @@ defmodule ExAudio.Dynamics do
   end
 
   defnp follow(x, env, k_att, k_rel) do
-    level = Nx.left_shift(Q.absolute(Q.wide(x)), @env_shift)
-    env |> Q.approach(level, k_att, k_rel, @k_bits) |> Q.clamp(0, @env_max)
+    level = x |> Q.wide() |> Q.absolute() |> Nx.min(@sample_max) |> Nx.left_shift(@env_shift)
+    env |> Q.approach(level, k_att, k_rel, @k_bits) |> Q.wrap_unsigned(@env_bits)
   end
 
   @doc "Declared tensor ranges of `gate/3`."
   def gate_ranges do
     k = 0..@k_max
-    th = 0..(1 <<< 23)
-    hold = 0..((1 <<< 24) - 1)
+    th = 0..@sample_max
+    hold = 0..@hold_max
+    gain = 0..((1 <<< @gain_bits) - 1)
 
     %{
       sample: [Q.sample_range()],
-      state: [0..@env_max, 0..1, hold, 0..@unity],
+      state: [@env_range, 0..1, hold, gain],
       params: [th, th, hold, 0..@unity, k, k, k, k]
     }
   end
@@ -215,7 +233,10 @@ defmodule ExAudio.Dynamics do
     open2 = Nx.select(above, 1, Nx.select(below, 0, open)) |> Nx.as_type(:s32)
     hold2 = Nx.select(open2 != 0, hold_n, Nx.max(hold - 1, 0)) |> Nx.as_type(:s32)
     target = Nx.select(open2 != 0 or hold > 0, @unity, Q.wide(floor))
-    gain2 = gain |> Q.wide() |> Q.approach(target, g_att, g_rel, @k_bits) |> Q.clamp(0, @unity)
+
+    gain2 =
+      gain |> Q.wide() |> Q.approach(target, g_att, g_rel, @k_bits) |> Q.wrap_unsigned(@gain_bits)
+
     y = (Q.wide(x) * Q.wide(gain)) |> shift_round(24) |> Q.sat24()
     {y, {env2, open2, hold2, Nx.as_type(gain2, :s32)}}
   end
@@ -226,7 +247,7 @@ defmodule ExAudio.Dynamics do
 
     %{
       sample: [Q.sample_range()],
-      state: [0..@env_max],
+      state: [@env_range],
       params: [-(35 <<< 16)..0, 0..65536, 0..(1 <<< 18), 0..(1 <<< 20), 0..65536, k, k]
     }
   end
