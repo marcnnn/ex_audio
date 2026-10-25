@@ -183,13 +183,14 @@ shift registers (pipeline delays) are counted separately, not as LUT:
 | output strip bank | 4554 | 10 210 | 77 | 131 | 3 | 2305 | 4 |
 | matrix (13 lanes) | 2508 | 2751 | 13 | 169 | 0 | 0 | 208 |
 | meters (one side) | 1105 | 1426 | 9 | 12 | 0 | 250 | 9 |
-| **sum of the parts** (both strips, matrix, both meters; registers not included) | 13 823 | 26 023 | 185 | 455 | 6 | 5106 | 234 |
-| XCKU3P share | 8.5 % | 8.0 % | 13.5 % | 63.2 % | 12.5 % | | |
+| **whole top** (`ea_mixer_1024`: both strips, matrix, both meters, register file) | 14 090 | 26 237 | 185 | 455 | 6 | 5106 | 234 |
+| XCKU3P share | 8.7 % | 8.1 % | 13.5 % | 63.2 % | 12.5 % | | |
 
 Numbers of wave 5 (ExHdl with split DSP products and `state_fold`). The
-Yosys run of the whole top (`ea_mixer_1024`) exited with status 1 without a
-message on the shared host, so the table sums the parts; in wave 3 the top
-was the parts plus about 240 LUT for the register file.
+whole top synthesises in 6 - 11 minutes with about 1.1 GB of memory; the
+register file and glue cost about 270 LUT and 214 FF over the parts. An
+earlier run of the top on the shared host exited with status 1 and an empty
+message; it did not reproduce in three reruns.
 
 The block RAMs of a strip bank are the coefficient banks (35 words x 32 bit
 x 1024 channels x 2 banks, 2.3 Mbit); its state is in 3 UltraRAMs (17
