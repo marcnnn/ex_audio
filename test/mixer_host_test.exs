@@ -53,6 +53,18 @@ defmodule ExAudio.MixerHostTest do
     assert Config.new(lanes: 16).lanes == 16
   end
 
+  test "Config folds the strip state above 512 channels while a frame of samples fits" do
+    assert {:block, 1} == Config.new(channels: 512) |> then(&{&1.state_mem, &1.state_fold})
+    assert {:ultra, 4} == Config.new(channels: 600) |> then(&{&1.state_mem, &1.state_fold})
+    # 2048 x 4 cycles exceed the frame and the 4096 rows of a URAM, 2048 x 2 do not
+    assert Config.new(channels: 2048, slots: 2).state_fold == 2
+    assert Config.new(channels: 24, state_fold: 4).state_fold == 4
+
+    assert_raise ArgumentError, ~r/state_fold: 8 does not fit/, fn ->
+      Config.new(channels: 1024, state_fold: 8)
+    end
+  end
+
   test "window offsets are aligned, disjoint and inside the address space" do
     cfg = Config.new()
     sizes = Layout.window_sizes(cfg)

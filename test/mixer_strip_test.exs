@@ -47,7 +47,7 @@ defmodule ExAudio.MixerStripTest do
       |> Enum.zip(users)
       |> Enum.with_index()
       |> Enum.map(fn {{x, u}, i} -> {x, rem(i, n), u} end)
-      |> beats(7, gap_pct)
+      |> beats(7, gap_pct, cfg.state_fold)
 
     # swap requested with the beat that is 500 samples into frame flip - 1
     k = (flip - 1) * n + div(n, 2)
@@ -128,10 +128,31 @@ defmodule ExAudio.MixerStripTest do
     assert got == expected
   end
 
+  test "24 channels, state folded over 4 rows of UltraRAM: one sample every 4 cycles" do
+    {cfg, got, expected} = run([channels: 24, state_mem: :ultra, state_fold: 4], 12, 7, 15)
+    assert cfg.state_fold == 4
+    assert got == expected
+  end
+
+  test "a beat 2 cycles after the previous one waits while the folded strip is not ready" do
+    cfg = Config.new(channels: 24, state_mem: :ultra, state_fold: 4)
+    {:ok, sim} = Cosim.build(Strip.build(cfg, "t"))
+    beat = fn c -> %{s_axis_tvalid: 1, s_axis_tdata: 1000, s_axis_tid: c, s_axis_tuser: 0} end
+
+    stimulus =
+      reset() ++
+        [%{m_axis_tready: 1, swap: 0} | List.duplicate(@idle, 150)] ++
+        [beat.(0), %{s_axis_tvalid: 0}, beat.(1), beat.(1), beat.(1), %{s_axis_tvalid: 0}]
+
+    {:ok, outs} = Cosim.run(sim, stimulus)
+    ready = outs |> Enum.take(-6) |> Enum.map(& &1.s_axis_tready)
+    assert ready == [1, 0, 0, 0, 1, 0]
+  end
+
   @tag :slow
-  test "1024 channels at one sample per cycle, state in UltraRAM, distinct strips per channel" do
+  test "1024 channels, one sample every 4 cycles, state folded in UltraRAM, distinct strips per channel" do
     {cfg, got, expected} = run([], 12, 7, 10)
-    assert cfg.channels == 1024
+    assert cfg.channels == 1024 and cfg.state_fold == 4
     assert got == expected
   end
 end

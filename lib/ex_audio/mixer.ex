@@ -13,7 +13,7 @@ defmodule ExAudio.Mixer do
 
   | Port | Meaning |
   |---|---|
-  | `s_axis` | AXI4-Stream in: 24-bit sample, `tid` the channel, `tuser` bit 0 frame start (channel 0). Every frame carries all channels in increasing order, at most one frame per `frame_cycles`; `tvalid` may have gaps |
+  | `s_axis` | AXI4-Stream in: 24-bit sample, `tid` the channel, `tuser` bit 0 frame start (channel 0). Every frame carries all channels in increasing order, at most one frame per `frame_cycles`; `tvalid` may have gaps. `tready` is high at most every `state_fold` cycles (`ExAudio.Mixer.Config`) |
   | `m_axis` | AXI4-Stream out: 24-bit sample, `tid`, `tuser` bit 0 frame start, bit 1 the sample saturated in the matrix |
   | `s_axil` | AXI4-Lite slave, 21-bit byte addresses: the map of `ExAudio.Mixer.Layout` |
 
@@ -52,14 +52,16 @@ defmodule ExAudio.Mixer do
   @doc """
   Cycles from the cycle in which the first sample of a frame is accepted on
   `s_axis` to the cycle in which the first sample of that frame is valid on
-  `m_axis`, when nothing stalls and the frames are back to back: the rest
-  of the input frame (`channels - 1`), the input strip pipeline (`d`, the
-  latency of the generated kernel), the matrix (`Matrix.first_beat/1` after
-  the last sample was written) and the output strip (`d` again).
+  `m_axis`, when nothing stalls and the samples of a frame come as fast as
+  the input strip takes them (one every `state_fold` cycles): the rest of
+  the input frame (`(channels - 1) * state_fold`), the input strip pipeline
+  (`d`, the latency of the generated kernel), the matrix
+  (`Matrix.first_beat/1` after the last sample was written) and the output
+  strip (`d` again).
   """
   def latency(%Config{} = cfg, strip_latency \\ nil) do
     d = strip_latency || Strip.design(cfg, "lat").latency
-    cfg.channels - 1 + d + Matrix.first_beat(cfg) + d
+    (cfg.channels - 1) * cfg.state_fold + d + Matrix.first_beat(cfg) + d
   end
 
   @doc "The RTL module, see the moduledoc. Takes a `ExAudio.Mixer.Config`."

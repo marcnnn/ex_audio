@@ -156,13 +156,17 @@ defmodule ExAudio.MixerBench do
   @doc "Cycles that reset the design for `n` cycles, then release."
   def reset(n \\ 3), do: List.duplicate(%{rst_n: 0}, n) ++ [%{rst_n: 1}]
 
-  @doc "Samples (`{value, channel, user}`) on consecutive cycles with random idle gaps."
-  def beats(list, seed, gap_pct \\ 0) do
+  @doc """
+  Samples (`{value, channel, user}`) every `spacing` cycles (a strip with
+  `state_fold: spacing` takes no more) with random idle gaps.
+  """
+  def beats(list, seed, gap_pct \\ 0, spacing \\ 1) do
     :rand.seed(:exsss, {seed, 3, 9})
+    idle = List.duplicate(%{s_axis_tvalid: 0}, spacing - 1)
 
     Enum.flat_map(list, fn {x, c, u} ->
       gap = if gap_pct > 0 and :rand.uniform(100) <= gap_pct, do: [%{s_axis_tvalid: 0}], else: []
-      gap ++ [%{s_axis_tvalid: 1, s_axis_tdata: s24(x), s_axis_tid: c, s_axis_tuser: u}]
+      gap ++ [%{s_axis_tvalid: 1, s_axis_tdata: s24(x), s_axis_tid: c, s_axis_tuser: u} | idle]
     end)
   end
 

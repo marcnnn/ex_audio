@@ -9,7 +9,7 @@ defmodule ExAudio.Mixer.Strip do
 
   | Port | Meaning |
   |---|---|
-  | `s_axis`, `m_axis` | AXI4-Stream: 24-bit sample, `tid` the channel, `tuser` a sideband (`user` bits) that travels with the sample. A frame starts where the channel does not increase |
+  | `s_axis`, `m_axis` | AXI4-Stream: 24-bit sample, `tid` the channel, `tuser` a sideband (`user` bits) that travels with the sample. A frame starts where the channel does not increase. With `cfg.state_fold` k > 1 `s_axis` takes one sample every k cycles |
   | `coeff` | `ExHdl.RTL.Interface.mem_port/1` slave (write only), word address `{channel, word}` with `word` in 6 bits |
   | `swap` | pulse: the banks swap at the next frame start |
   | `pending` | high until the swap is done and no sample of the old bank is left |
@@ -33,7 +33,7 @@ defmodule ExAudio.Mixer.Strip do
   The generated stream kernel (`ExHdl.Backends.SystemVerilog.Scan.Design`).
   `opts`: `:user` (sideband bits, 1), `:sections` and `:dynamics` of
   `ExAudio.Strip.cascade_spec/1`, `:channels` (default `cfg.channels`),
-  `:state_mem` (default `cfg.state_mem`).
+  `:state_mem`, `:state_fold` and `:state_row_bits` (defaults from `cfg`).
   """
   def design(%Config{} = cfg, name, opts \\ []) do
     spec = ExAudio.Strip.cascade_spec(Keyword.take(opts, [:sections, :dynamics]))
@@ -48,6 +48,8 @@ defmodule ExAudio.Mixer.Strip do
             name: "ea_strip_#{name}_#{channels}_core",
             channels: channels,
             state_mem: Keyword.get(opts, :state_mem, cfg.state_mem),
+            state_fold: Keyword.get(opts, :state_fold, cfg.state_fold),
+            state_row_bits: Keyword.get(opts, :state_row_bits, cfg.state_row_bits),
             channel_params: :all,
             tid: true,
             tuser: Keyword.get(opts, :user, 1),

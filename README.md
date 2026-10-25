@@ -15,7 +15,7 @@ bit-identical.
 | `ExAudio.Meter`: peak hold with clip flag, RMS (log2 level) | done |
 | `ExAudio.Matrix`: sparse crosspoint table and mixer on the BEAM, kernels for one output row (parallel, and one multiplier streaming) | done |
 | Verilator co-simulation of all kernels, Yosys estimates (`mix ex_hdl.gen.sv ExAudio.Kernels --synth`) | done |
-| `ExAudio.Mixer`: 1024 channels at one sample per cycle on UltraScale+ 250 MHz: 4 biquads, gate and compressor per channel in and out (state in UltraRAM, coefficients in RAM), 13 lane MAC matrix with 64 crosspoints per output, meters, AXI4-Stream and AXI4-Lite; Verilator against the Nx references, Yosys estimates | done, see [The mixer](#the-1024-channel-mixer) |
+| `ExAudio.Mixer`: 1024 channels on UltraScale+ 250 MHz: 4 biquads, gate and compressor per channel in and out (state folded in UltraRAM, one sample every 4 cycles; coefficients in RAM), 13 lane MAC matrix with 64 crosspoints per output, meters, AXI4-Stream and AXI4-Lite; Verilator against the Nx references, Yosys estimates | done, see [The mixer](#the-1024-channel-mixer) |
 | `ExAudio.Mixer.Host`: Hz, dB, ms and gains to register and window writes | done |
 | Matrix lanes as scan kernels (RAM gather, multiplier sharing in ExHdl) | waits for ExHdl, see [NEEDS.md](NEEDS.md) |
 | Place and route (Vivado), clock crossing for the bus side, AES67 and PCIe attachment | later |
@@ -119,7 +119,7 @@ s_axis ─ in strip ─┬─ frame RAM ─ 13 MAC lanes ─ sequencer ─ out s
 
 | Part | Module | What it is |
 |---|---|---|
-| Strip bank (twice) | `ExAudio.Mixer.Strip` | `ExAudio.Strip.cascade_spec/1` (4 biquads, gate, compressor) as one kernel with `channels: 1024`, state in UltraRAM, a two-bank RAM of 35 coefficient words per channel, `tid` and `tuser`; 32-bit window with a staging register file that commits a channel when its last word is written |
+| Strip bank (twice) | `ExAudio.Mixer.Strip` | `ExAudio.Strip.cascade_spec/1` (4 biquads, gate, compressor) as one kernel with `channels: 1024`, state in UltraRAM folded over 4 rows per channel (`state_fold: 4`, one sample every 4 cycles), a two-bank RAM of 35 coefficient words per channel, `tid` and `tuser`; 32-bit window with a staging register file that commits a channel when its last word is written |
 | Matrix | `ExAudio.Mixer.Matrix` | frame RAM written by the input strip (double buffered), `lanes` MAC pipelines, output RAM, sequencer; reference `ExAudio.Matrix.mix_clip/2` |
 | Meters (twice) | `ExAudio.Mixer.Meters` | `Meter.peak/3` and `Meter.rms/3` for every channel, results in RAMs the host reads |
 | Registers | `ExAudio.Mixer.Layout`, `ExAudio.Mixer.Regs` | `defregs` map: AXI4-Lite slave, C header (`Regs.c_header/0`), Markdown (`Regs.markdown/0`) |
@@ -131,7 +131,7 @@ s_axis ─ in strip ─┬─ frame RAM ─ 13 MAC lanes ─ sequencer ─ out s
 | Port | |
 |---|---|
 | `clk`, `rst_n` | one clock, synchronous active-low reset |
-| `s_axis` | AXI4-Stream in: `tdata` 24 bit (Q1.23), `tid` 10 bit channel, `tuser[0]` frame start (channel 0), `tvalid`/`tready`. Every frame carries all channels in increasing order, at most one frame per 5208 cycles, gaps in `tvalid` allowed. Taken only when `ctrl.enable` is set |
+| `s_axis` | AXI4-Stream in: `tdata` 24 bit (Q1.23), `tid` 10 bit channel, `tuser[0]` frame start (channel 0), `tvalid`/`tready`. Every frame carries all channels in increasing order, at most one frame per 5208 cycles, gaps in `tvalid` allowed. Taken only when `ctrl.enable` is set, at most one sample every 4 cycles (`tready`) |
 | `m_axis` | AXI4-Stream out: `tdata` 24 bit, `tid`, `tuser[0]` frame start, `tuser[1]` the sample saturated in the matrix |
 | `s_axil` | AXI4-Lite slave, 21-bit byte addresses |
 
@@ -139,10 +139,12 @@ s_axis ─ in strip ─┬─ frame RAM ─ 13 MAC lanes ─ sequencer ─ out s
 
 At 48 kHz and 250 MHz a frame is 250 000 000 / 48 000 = 5208 cycles.
 
-- Strips: one sample per cycle, 1024 cycles per frame (20 %), 120 cycles
-  deep. The loop of a section is 8 cycles in the 250 MHz UltraScale+ model (10
-  with the UltraRAM read), far below the 1024 cycles between two samples of
-  a channel, so the state RAM needs no forwarding.
+- Strips: one sample every 4 cycles, 4096 cycles per frame (79 %), 110
+  cycles deep. The state of a channel is spread over 4 rows of the state
+  memory (`ExAudio.Mixer.Config`, ExHdl's `state_fold`), which is what lets
+  it fit 3 UltraRAMs per bank instead of 17. The loop of a section is 8
+  cycles in the 250 MHz UltraScale+ model, far below the 4096 cycles
+  between two samples of a channel, so the state RAM needs no forwarding.
 - Matrix: 1024 outputs x 64 sources = 65 536 products per frame.
   `lanes = ceil(65 536 / 5208) = 13` (12.6). Lane `l` computes outputs
   `79 l ... 79 l + 78` (`ceil(1024 / 13) = 79`, the last lane 76), each
@@ -151,14 +153,16 @@ At 48 kHz and 250 MHz a frame is 250 000 000 / 48 000 = 5208 cycles.
   compute time fits the frame (16 outputs x 4 slots in 20 cycles gets 6
   lanes of 3 outputs, 19 cycles).
 - Latency without stalls from the first accepted input sample to the first
-  output sample: `1023 + 120 + 5065 + 120 = 6328` cycles (25.3 µs, 1.2
+  output sample: `1023 x 4 + 110 + 5065 + 110 = 9377` cycles (37.5 µs, 1.8
   frames): the rest of the input frame, the input strip, the matrix (starts
   when channel 1023 has left the input strip, first result 5065 cycles
   later), the output strip. Checked in the top-level co-simulation
-  (`Mixer.latency/2`).
-- The output sequencer streams the 1024 results in channel order, one per
-  cycle, while the lanes already compute the next frame (output RAM and
-  frame RAM are double buffered).
+  (`Mixer.latency/2`). Unfolded (`state_fold: 1`, 17 UltraRAMs per bank)
+  it is `1023 + 107 + 5065 + 107 = 6302` cycles (25.2 µs).
+- The output sequencer streams the 1024 results in channel order as fast
+  as the output strip takes them (one every 4 cycles), while the lanes
+  already compute the next frame (output RAM and frame RAM are double
+  buffered).
 
 The MAC is a 24 x 18 bit multiply (Q1.23 sample, Q3.15 gain as 18-bit two's
 complement), input registers, product register and a 48-bit accumulator
@@ -175,18 +179,26 @@ shift registers (pipeline delays) are counted separately, not as LUT:
 
 | Part | LUT | FF | DSP48E2 | RAMB18 | URAM | SRL | LUTRAM |
 |---|---|---|---|---|---|---|---|
-| input strip bank (4 biquads, gate, compressor, 1024 channels) | 6124 | 4787 | 106 | 132 | 17 | 2564 | 4 |
-| output strip bank | 6129 | 4787 | 106 | 132 | 17 | 2568 | 4 |
+| input strip bank (4 biquads, gate, compressor, 1024 channels, state folded over 4 rows) | 4551 | 10 210 | 77 | 131 | 3 | 2301 | 4 |
+| output strip bank | 4554 | 10 210 | 77 | 131 | 3 | 2305 | 4 |
 | matrix (13 lanes) | 2508 | 2751 | 13 | 169 | 0 | 0 | 208 |
-| meters (one side) | 1248 | 828 | 10 | 12 | 0 | 372 | 9 |
-| **mixer top** (both strips, matrix, both meters, registers) | 17 493 | 14 195 | 245 | 457 | 34 | 5876 | 234 |
-| XCKU3P share | 10.8 % | 4.4 % | 17.9 % | 63.5 % | 70.8 % | | |
+| meters (one side) | 1105 | 1426 | 9 | 12 | 0 | 250 | 9 |
+| **sum of the parts** (both strips, matrix, both meters; registers not included) | 13 823 | 26 023 | 185 | 455 | 6 | 5106 | 234 |
+| XCKU3P share | 8.5 % | 8.0 % | 13.5 % | 63.2 % | 12.5 % | | |
+
+Numbers of wave 5 (ExHdl with split DSP products and `state_fold`). The
+Yosys run of the whole top (`ea_mixer_1024`) exited with status 1 without a
+message on the shared host, so the table sums the parts; in wave 3 the top
+was the parts plus about 240 LUT for the register file.
 
 The block RAMs of a strip bank are the coefficient banks (35 words x 32 bit
-x 1024 channels x 2 banks, 2.3 Mbit); its state is in UltraRAM (17). The
-matrix has 13 copies of the frame RAM (one read port per lane, 2 x 1024 x
-24 bit) and the crosspoint RAMs (65 536 x 28 bit in 13 pieces). A strip bank has 106 DSPs because the 32 x 24 and 32 x 32 bit
-products of a biquad are mapped by Yosys at 4 slices each (NEEDS.md, 2).
+x 1024 channels x 2 banks, 2.3 Mbit); its state is in 3 UltraRAMs (17
+unfolded, wave 3). Folding costs flip-flops: the state of the later
+sections waits in pipeline registers for its stage (about 13 500 bits per
+bank, most of the FF growth since wave 3); `state_row_bits: 36` gives 5
+UltraRAMs per bank for about 6200 bits. The matrix has 13 copies of the
+frame RAM (one read port per lane, 2 x 1024 x 24 bit) and the crosspoint
+RAMs (65 536 x 28 bit in 13 pieces).
 
 ### Host side
 

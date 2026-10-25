@@ -43,7 +43,9 @@ the 1368 on the XCKU3P. `ExHdl.Target.Timing` costs such a multiply as two
 DSPs in a cascade, which is optimistic for 32 x 32, so the latencies
 and loop lengths of the strips are estimates. Needed: explicit splitting
 into partial products with a pipelined adder tree (and the cost model to
-match), now for the 27 x 18 DSP48E2.
+match), now for the 27 x 18 DSP48E2. (Wave 5: ExHdl now splits wide
+products, `Design.dsp`; Yosys counts 77 DSP48E2 per strip bank instead of
+106. Not re-checked against the 14-per-biquad target.)
 
 ### 3. DSP48E2 as an RTL primitive
 
@@ -184,25 +186,40 @@ per-group recurrences, kernel composition, the UltraScale+ timing family
 and `Nx.abs/1` under Yosys 0.69 (`ExAudio.Q.absolute/1` is `Nx.abs/1`
 again; its range `0..2^23` is proven directly).
 
-## Open work (wave 3 hand-off)
+## Open work (wave 3 hand-off, updated in wave 5)
 
-* URAM budget. Corrected 2026-10-23: the 34 URAM of the mixer top are
-  the two strip banks' state (17 each), not the matrix (0 URAM, 169 RAMB18
-  for 13 frame RAM copies and the crosspoint RAMs). The state is about
-  1200 bits per channel, so it is 17 URAMs wide but only `channels` deep
-  (a URAM is 4096 deep, a quarter used at 1024 channels). The card
-  (aes67_card) uses only the matrix, no strips, so it is not affected.
-  Done: `Config.new/1` puts the state in block RAM up to 512 channels.
-  Open: for 1024 channels the real fix is a folded state memory in the
-  exhdl scan backend (a channel's state over k rows of a k-times narrower
-  memory, the kernel accepting one sample every k cycles; the strip needs
-  1024 of 5208 cycles per frame, so k = 4 fits): 5 URAM per bank instead
-  of 17. A gather-kernel matrix would trade the matrix's block RAM for
-  URAM (13 URAM, 48 RAMB18 for 1024x64), so it helps the block RAM budget
-  only.
-* Narrow the strip state and replace the hand-written clamps in
-  `ExAudio.Mixer.Strip` with `ExHdl.DSP.wrap/2` or the saturate helpers.
-  Not started.
+* URAM budget. Done in wave 5. The strip state was 646 bits per channel
+  (not 1200 as written here before; the 1120 bits are the coefficient
+  word), 636 after the narrowing below, in 13 memories, one per pipeline stage that reads state: two per
+  biquad (48 and 83 bits), five for gate and compressor. A memory takes at
+  least one URAM, so unfolded that is 17 URAM per bank at 1024 channels.
+  ExHdl's `state_fold: k` (exhdl wave 5) spreads a channel's state over
+  `k` rows of a memory and merges consecutive memories while a row stays
+  within `state_row_bits` (72); the kernel then accepts one sample every
+  `k` cycles. `Config.new/1` uses `k = 4` above 512 channels (4096 of
+  5208 cycles per frame): 3 URAM per bank (66, 66 and 28 bits by 4096
+  rows) instead of 17, 6 instead of 34 for the mixer, for about 13500
+  more pipeline register bits per bank (delay lines without reset, SRL
+  candidates). `state_row_bits: 36` gives 5 URAM per bank for 6200 bits.
+  Up to 512 channels the state stays unfolded in block RAM. Yosys
+  (`synth_xilinx -family xcup`) counts 3 URAM per strip bank and 10 210 FF
+  (4787 in wave 3); the run of the whole top exited with status 1 without
+  a message, so the README table sums the parts. No Vivado run.
+  Open: the datapath is not shared over the `k` cycles (same DSP count at
+  a quarter of the rate); multiplier sharing under `channels:` would be
+  the next saving (item 1). A gather-kernel matrix would trade the
+  matrix's block RAM for URAM (13 URAM, 48 RAMB18 for 1024x64), so it
+  helps the block RAM budget only.
+* Strip clamps and state width. Done in wave 5. The clamps that only
+  served the range proof are gone from the feedback loops: the envelope
+  follower and the gate's gain use `ExAudio.Q.wrap_unsigned/2` (the
+  smoother never overshoots, so the wrap is the identity on reachable
+  values and the hardware keeps the low bits), the biquad's history
+  saturation is `NxFixed.Primitives.saturate(:s32)`. The envelope is 35
+  bits (was 36; `|x|` saturates to `2^23 - 1` before the follower, outside
+  the loop), the gate's hold counter 16 bits (was 24; `hold_ms` at most
+  65535 samples, 1365 ms at 48 kHz, `gate_params/1` raises above). The
+  gate thresholds are at most `2^23 - 1`.
 * Test suite: the untagged co-simulation tests in `mixer_matrix_test.exs`
-  are now tagged `:verilator` with a 600 s timeout (Verilator builds on the
+  are tagged `:verilator` with a 600 s timeout (Verilator builds on the
   shared host take over 60 s).

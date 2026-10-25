@@ -17,17 +17,28 @@ defmodule ExAudio.Mixer.Config do
 
   Options: `:channels` (1024, at most 2^16), `:slots` (a power of two, 64),
   `:fs` (48000), `:clock_mhz` (250), `:frame_cycles` (`clock / fs`),
-  `:lanes`, `:state_mem` (strips, see below), `:meter_mem` (`:block`),
-  `:xp_style` (crosspoint RAMs, `:block`), `:family`
-  (`:ultrascale_plus`).
+  `:lanes`, `:state_mem`, `:state_fold` and `:state_row_bits` (strips, see
+  below), `:meter_mem` (`:block`), `:xp_style` (crosspoint RAMs, `:block`),
+  `:family` (`:ultrascale_plus`).
 
-  The strip state is about 1200 bits per channel, so its memory is as
-  wide as 17 UltraRAMs (72 bits each) but only `channels` deep. A URAM is
-  4096 deep and a RAMB18 512, so up to 512 channels the state goes to block
-  RAM (34 RAMB18 per strip bank instead of 17 URAM), above that to URAM:
+  The strip state is 636 bits per channel in 13 memories, one per pipeline
+  stage that reads state (two per biquad, five for gate and compressor,
+  1 to 83 bits wide). A URAM is 72 x 4096 and a RAMB18 36 x 512, so
+  unfolded the state of 1024 channels takes 17 URAMs, each a quarter used.
+  Up to 512 channels the state goes to block RAM. Above that it goes to
+  URAM folded over `state_fold` rows per channel (`ExHdl`'s `state_fold:`):
+  the strip accepts one sample every `state_fold` cycles, and the memories
+  merge into rows of at most `state_row_bits` (72): 3 URAMs per strip bank
+  (memories of 66, 66 and 28 bits by 4096 rows). `state_fold` is the
+  largest of 4 and 2 for which a frame of samples fits `frame_cycles` and
+  the memory is at most 4096 deep, else 1:
 
-      iex> {ExAudio.Mixer.Config.new(channels: 256).state_mem, ExAudio.Mixer.Config.new().state_mem}
-      {:block, :ultra}
+      iex> cfg = ExAudio.Mixer.Config.new(channels: 256)
+      iex> {cfg.state_mem, cfg.state_fold}
+      {:block, 1}
+      iex> cfg = ExAudio.Mixer.Config.new()
+      iex> {cfg.state_mem, cfg.state_fold}
+      {:ultra, 4}
   """
   import Bitwise
 
@@ -45,6 +56,8 @@ defmodule ExAudio.Mixer.Config do
     :cycles,
     :family,
     :state_mem,
+    :state_fold,
+    :state_row_bits,
     :meter_mem,
     :xp_style,
     :cw,
@@ -71,6 +84,14 @@ defmodule ExAudio.Mixer.Config do
 
     lanes = Keyword.get_lazy(opts, :lanes, fn -> div(channels * slots + frame - 1, frame) end)
     {lanes, per_lane} = fit(channels, slots, frame, lanes, Keyword.has_key?(opts, :lanes))
+    fold = Keyword.get_lazy(opts, :state_fold, fn -> default_fold(channels, frame) end)
+
+    unless is_integer(fold) and fold >= 1 and channels * fold <= frame,
+      do:
+        raise(
+          ArgumentError,
+          "state_fold: #{inspect(fold)} does not fit: #{channels} channels need #{channels} x state_fold of #{frame} cycles"
+        )
 
     %__MODULE__{
       channels: channels,
@@ -83,6 +104,8 @@ defmodule ExAudio.Mixer.Config do
       cycles: per_lane * slots + @pipe,
       family: Keyword.get(opts, :family, :ultrascale_plus),
       state_mem: Keyword.get(opts, :state_mem, if(channels > 512, do: :ultra, else: :block)),
+      state_fold: fold,
+      state_row_bits: Keyword.get(opts, :state_row_bits, 72),
       meter_mem: Keyword.get(opts, :meter_mem, :block),
       xp_style: Keyword.get(opts, :xp_style, :block),
       cw: clog2(channels),
@@ -92,6 +115,11 @@ defmodule ExAudio.Mixer.Config do
       gain_bits: 18
     }
   end
+
+  defp default_fold(channels, _frame) when channels <= 512, do: 1
+
+  defp default_fold(channels, frame),
+    do: Enum.find([4, 2], 1, &(channels * &1 <= min(frame, 4096)))
 
   # the fewest lanes (at least `lanes`) whose compute time fits the frame, or the given count
   defp fit(channels, slots, frame, lanes, fixed?) do

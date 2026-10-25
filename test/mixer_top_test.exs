@@ -81,6 +81,7 @@ defmodule ExAudio.MixerTopTest do
     flip_in = Keyword.get(opts, :flip_in, frames)
     flip_out = Keyword.get(opts, :flip_out, frames)
     spacing = Keyword.get(opts, :spacing, cfg.frame_cycles)
+    k = cfg.state_fold
     swap? = flip_in < frames or flip_out < frames
     h = Host.new(cfg)
     mod = Mixer.build(cfg)
@@ -138,22 +139,29 @@ defmodule ExAudio.MixerTopTest do
     # -- stimulus: frames, swaps at the gaps, final reads
     stream =
       Enum.flat_map(0..(frames - 1), fn f ->
+        # one beat every state_fold cycles, as fast as the input strip takes them
         beats =
           for c <- channels do
-            %{
-              s_axis_tvalid: 1,
-              s_axis_tdata: s24(Enum.at(xs[c], f)),
-              s_axis_tid: c,
-              s_axis_tuser:
-                if(c == 0 and not (f == frames - 1 and opts[:bad_start] == true), do: 1, else: 0)
-            }
+            [
+              %{
+                s_axis_tvalid: 1,
+                s_axis_tdata: s24(Enum.at(xs[c], f)),
+                s_axis_tid: c,
+                s_axis_tuser:
+                  if(c == 0 and not (f == frames - 1 and opts[:bad_start] == true),
+                    do: 1,
+                    else: 0
+                  )
+              }
+              | List.duplicate(%{s_axis_tvalid: 0}, k - 1)
+            ]
           end
 
-        beats ++ List.duplicate(%{s_axis_tvalid: 0}, spacing - n)
+        List.flatten(beats) ++ List.duplicate(%{s_axis_tvalid: 0}, spacing - n * k)
       end)
 
     latency = Mixer.latency(cfg, Mixer.Strip.design(cfg, "t").latency)
-    gap = div(spacing - n, 2)
+    gap = div(spacing - n * k, 2)
 
     swaps_in =
       if flip_in < frames, do: [{flip_in * spacing - gap, Host.swap(h, :inputs)}], else: []
@@ -303,6 +311,19 @@ defmodule ExAudio.MixerTopTest do
       )
 
     assert_scenario(s, bad_start: true)
+  end
+
+  test "24 channels with the strip state folded over 4 rows: one input and output sample every 4 cycles" do
+    s =
+      scenario([channels: 24, slots: 8, frame_cycles: 400, state_mem: :ultra, state_fold: 4],
+        frames: 6,
+        flip_in: 3,
+        flip_out: 4,
+        spacing: 400
+      )
+
+    assert s.cfg.state_fold == 4
+    assert_scenario(s, [])
   end
 
   @tag :slow
