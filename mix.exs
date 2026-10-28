@@ -8,7 +8,8 @@ defmodule ExAudio.MixProject do
       elixir: "~> 1.17",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
-      deps: deps()
+      deps: deps(),
+      package: [licenses: ["Apache-2.0"]]
     ]
   end
 

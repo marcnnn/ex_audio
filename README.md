@@ -309,3 +309,7 @@ targets, tool drivers). Function lives in these siblings:
 mix test
 ```
 
+
+## License
+
+Apache-2.0, see `LICENSE`.
