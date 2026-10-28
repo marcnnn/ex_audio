@@ -294,18 +294,20 @@ targets, tool drivers). Function lives in these siblings:
 
 | Library | Scope |
 |---|---|
-| [ex_hdl_cores](../ex_hdl_cores) | generic IP: FIFOs, CRC, arbiters, AXI4-Stream plumbing |
-| [ex_hdl_xilinx](../ex_hdl_xilinx) | Xilinx primitives, constraints, boards |
-| [ex_net](../ex_net) | Ethernet MAC, PCS, VLAN/IPv4/UDP/IGMP |
-| [ex_ptp](../ex_ptp) | IEEE 1588: timestamping, wallclock, servo, BMCA |
-| [ex_aes67](../ex_aes67) | RTP streams, jitter buffer, SAP/SDP, RTSP, mDNS, NMOS |
-| [ex_audio](../ex_audio) | audio DSP kernels: EQ, dynamics, matrix mixer, meters |
-| [ex_pcie](../ex_pcie) | PCIe DMA and BAR access, host side over vfio |
+| [ex_hdl_cores](https://github.com/marcnnn/ex_hdl_cores) | generic IP: FIFOs, CRC, arbiters, AXI4-Stream plumbing |
+| [ex_hdl_xilinx](https://github.com/marcnnn/ex_hdl_xilinx) | Xilinx primitives, constraints, boards |
+| [ex_net](https://github.com/marcnnn/ex_net) | Ethernet MAC, PCS, VLAN/IPv4/UDP/IGMP |
+| [ex_ptp](https://github.com/marcnnn/ex_ptp) | IEEE 1588: timestamping, wallclock, servo, BMCA |
+| [ex_aes67](https://github.com/marcnnn/ex_aes67) | RTP streams, jitter buffer, SAP/SDP, RTSP, mDNS, NMOS |
+| [ex_audio](https://github.com/marcnnn/ex_audio) | audio DSP kernels: EQ, dynamics, matrix mixer, meters |
+| [ex_pcie](https://github.com/marcnnn/ex_pcie) | PCIe DMA and BAR access, host side over vfio |
 
 ## Development
 
+Sibling libraries come from a checkout next to this one when there is one
+(`../exhdl` for ex_hdl, `../<name>` for the others), otherwise from GitHub.
+
 ```sh
-./scripts/checkout_siblings.sh   # path dependencies
 mix test
 ```
 
